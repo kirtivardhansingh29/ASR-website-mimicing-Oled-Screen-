@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hinglish ASR — ESP32-S3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+/* ── Reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: #f0ece4; display: flex; align-items: center; justify-content: center; font-family: 'IBM Plex Mono', monospace; }
+
+/* ── Device Shell ── */
+.device { display: flex; flex-direction: column; align-items: center; padding: 28px 20px 24px; background: #c8bfae; border-radius: 14px; }
+.bezel-top { width: 420px; height: 10px; background: #b8afa0; border-radius: 6px 6px 0 0; border: 1.5px solid #a89f90; border-bottom: none; }
+.bezel-bot { width: 420px; height: 16px; background: #b8afa0; border-radius: 0 0 6px 6px; border: 1.5px solid #9a9188; border-top: none; display: flex; align-items: center; justify-content: center; }
+.usb-port { width: 22px; height: 7px; background: #c8bfae; border: 1px solid #8a8078; border-radius: 2px; }
+
+/* ── ePaper Screen ── */
+.screen { width: 420px; background: #ece8e0; border: 1.5px solid #9a9188; border-top: none; border-bottom: none; }
+.epaper {
+  padding: 20px 24px 16px;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  /* paper grain texture */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Crect width='1' height='1' fill='%23c4c0b8' opacity='0.3'/%3E%3C/svg%3E");
+}
+
+/* ── Header ── */
+.hdr { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 10px; border-bottom: 1px solid #b4b0a8; margin-bottom: 14px; }
+.hdr-title { font-size: 9px; letter-spacing: 3px; color: #3a3630; font-family: 'IBM Plex Sans', sans-serif; font-weight: 500; text-transform: uppercase; }
+.hdr-sub { font-size: 8px; color: #8a8680; letter-spacing: 1px; margin-top: 3px; }
+.hdr-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.dots { display: flex; gap: 5px; align-items: center; }
+.dot { width: 5px; height: 5px; border-radius: 50%; }
+.dot-pwr { background: #3a3630; border: 1px solid #2a2620; }
+.dot-net { background: #3a3630; border: 1px solid #2a2620; }
+.dot-rec { background: #ece8e0; border: 1px solid #8a8680; transition: background 0.2s; }
+.dot-rec.active { background: #2a2826; animation: blink-dot 0.7s step-end infinite; }
+@keyframes blink-dot { 0%, 100% { background: #2a2826; } 50% { background: #ece8e0; } }
+.hdr-clock { font-size: 8px; color: #8a8680; letter-spacing: 1px; }
+
+/* ── Main content area ── */
+.main { flex: 1; display: flex; flex-direction: column; justify-content: center; min-height: 180px; }
+.view { display: none; flex-direction: column; gap: 8px; }
+.view.active { display: flex; }
+
+/* ── Idle view ── */
+.idle-title { font-size: 11px; letter-spacing: 4px; color: #2a2826; font-family: 'IBM Plex Sans', sans-serif; font-weight: 500; text-transform: uppercase; }
+.idle-hint { font-size: 10px; color: #7a7670; letter-spacing: 0.5px; line-height: 1.9; margin-top: 4px; }
+.divider { height: 1px; background: #c4c0b8; margin: 10px 0; }
+.cursor-row { display: flex; align-items: center; gap: 7px; }
+.hw-cursor { width: 8px; height: 1px; background: #3a3630; animation: cursor-blink 1.2s step-end infinite; }
+@keyframes cursor-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+.cursor-lbl { font-size: 8px; color: #9a9690; letter-spacing: 1px; }
+
+/* Engine selector */
+.engine-row { display: flex; gap: 8px; margin-top: 6px; }
+.eng-btn {
+  cursor: pointer; padding: 5px 12px; font-family: 'IBM Plex Mono', monospace;
+  font-size: 8px; letter-spacing: 1px; border: 1px solid #b4b0a8;
+  border-radius: 2px; background: transparent; color: #5a5650; transition: all 0.15s;
+  user-select: none;
+}
+.eng-btn:hover { background: #dedad2; color: #2a2826; }
+.eng-btn.selected { background: #2a2826; color: #ece8e0; border-color: #2a2826; }
+.eng-note { font-size: 7px; color: #9a9690; letter-spacing: 0.5px; margin-top: 4px; }
+.eng-note span { color: #5a5650; }
+
+/* ── Recording view ── */
+.rec-badge { display: flex; align-items: center; gap: 7px; font-size: 9px; letter-spacing: 2px; color: #1a1816; font-family: 'IBM Plex Sans', sans-serif; font-weight: 500; }
+.rec-dot { width: 6px; height: 6px; border-radius: 50%; background: #1a1816; animation: blink-dot 0.6s step-end infinite; }
+.rec-timer { font-size: 38px; font-weight: 300; letter-spacing: 2px; color: #1a1816; line-height: 1; margin: 4px 0; }
+.waveform { width: 100%; height: 38px; display: block; }
+.rec-sub { font-size: 8px; color: #8a8680; letter-spacing: 1px; }
+/* Live interim transcript (Browser ASR only) */
+.interim { font-size: 11px; color: #5a5650; font-family: 'IBM Plex Sans', sans-serif; font-weight: 300; min-height: 22px; font-style: italic; line-height: 1.5; }
+
+/* ── Processing view ── */
+.busy-title { font-size: 9px; letter-spacing: 2px; color: #2a2826; font-family: 'IBM Plex Sans', sans-serif; font-weight: 500; }
+.progress-track { height: 2px; background: #c8c4bc; border-radius: 1px; overflow: hidden; margin: 8px 0; }
+.progress-fill { height: 100%; background: #2a2826; border-radius: 1px; width: 0; transition: width 0.5s ease; }
+.log-line { font-size: 9px; color: #5a5650; letter-spacing: 0.5px; line-height: 2; opacity: 0; transition: opacity 0.4s; }
+.log-line.show { opacity: 1; }
+.spin { color: #2a2826; }
+
+/* ── Result view ── */
+.result-label { font-size: 8px; letter-spacing: 3px; color: #8a8680; font-family: 'IBM Plex Sans', sans-serif; font-weight: 500; text-transform: uppercase; }
+.result-text { font-size: 13px; color: #1a1816; line-height: 1.75; font-family: 'IBM Plex Sans', sans-serif; font-weight: 300; min-height: 56px; margin-top: 6px; letter-spacing: 0.2px; word-break: break-word; }
+.result-meta { display: flex; justify-content: space-between; font-size: 8px; color: #9a9690; flex-wrap: wrap; gap: 4px; }
+
+/* ── Error view ── */
+.err-header { font-size: 9px; letter-spacing: 2px; color: #1a1816; font-family: 'IBM Plex Sans', sans-serif; font-weight: 500; text-transform: uppercase; border-bottom: 1px solid #b4b0a8; padding-bottom: 8px; }
+.err-code { font-size: 20px; color: #1a1816; letter-spacing: 1px; margin: 6px 0 4px; line-height: 1; }
+.err-trace { font-size: 8px; color: #5a5650; line-height: 2; letter-spacing: 0.5px; }
+.err-hint { font-size: 8px; color: #8a8680; letter-spacing: 1px; margin-top: 8px; }
+
+/* ── Footer ── */
+.ftr { display: flex; justify-content: space-between; padding-top: 10px; border-top: 1px solid #b4b0a8; margin-top: 14px; }
+.ftr span { font-size: 7px; letter-spacing: 1.5px; color: #9a9690; font-family: 'IBM Plex Sans', sans-serif; text-transform: uppercase; }
+
+/* ── Physical buttons ── */
+.btn-row { display: flex; gap: 14px; margin-top: 16px; align-items: flex-end; }
+.btn-unit { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.btn {
+  cursor: pointer; background: #b8afa0; border: 1px solid #9a9188;
+  border-bottom: 3px solid #8a8078; border-radius: 3px;
+  padding: 7px 18px; font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px; letter-spacing: 1.5px; color: #3a3630;
+  transition: border-bottom 0.08s, transform 0.08s;
+  user-select: none; min-width: 68px; text-align: center;
+}
+.btn:active { border-bottom: 1px solid #8a8078; transform: translateY(2px); }
+.btn-rec-cap { background: #2a2826; border-color: #1a1816; border-bottom-color: #0a0806; color: #d4d0c8; }
+.btn-rec-cap.recording { background: #3d3a36; }
+.btn-lbl { font-size: 7px; color: #8a8078; letter-spacing: 1.5px; font-family: 'IBM Plex Sans', sans-serif; text-transform: uppercase; }
+</style>
+</head>
+<body>
+
+<div class="device">
+  <div class="bezel-top"></div>
+
+  <div class="screen">
+    <div class="epaper">
+
+      <!-- Header -->
+      <div class="hdr">
+        <div>
+          <div class="hdr-title">Hinglish ASR</div>
+          <div class="hdr-sub">ESP32-S3 · Whisper + Web Speech</div>
+        </div>
+        <div class="hdr-right">
+          <div class="dots">
+            <div class="dot dot-pwr" title="Power"></div>
+            <div class="dot dot-net" title="WiFi"></div>
+            <div class="dot dot-rec" id="led-rec" title="Record"></div>
+          </div>
+          <div class="hdr-clock" id="clock">00:00:00</div>
+        </div>
+      </div>
+
+      <!-- Main area -->
+      <div class="main">
+
+        <!-- IDLE -->
+        <div class="view active" id="v-idle">
+          <div class="idle-title">System Ready</div>
+          <div class="idle-hint">Press REC to begin transcription<br>Hinglish supported · speak clearly</div>
+          <div class="divider"></div>
+          <div class="cursor-row">
+            <div class="hw-cursor"></div>
+            <div class="cursor-lbl">awaiting input · select engine below</div>
+          </div>
+          <div class="engine-row">
+            <div class="eng-btn selected" id="eng-browser" onclick="selectEngine('browser')">Browser API</div>
+            <div class="eng-btn" id="eng-modal" onclick="selectEngine('modal')">Modal Whisper</div>
+          </div>
+          <div class="eng-note" id="eng-note">
+            <span>Browser API</span> — free, built-in, works offline · Chrome/Edge only
+          </div>
+        </div>
+
+        <!-- RECORDING -->
+        <div class="view" id="v-rec">
+          <div class="rec-badge"><div class="rec-dot"></div><span>Recording</span></div>
+          <div class="rec-timer" id="rec-timer">00:00</div>
+          <canvas class="waveform" id="waveform" width="372" height="38"></canvas>
+          <div class="rec-sub" id="rec-sub">speak now · press REC to stop · max 30s</div>
+          <div class="interim" id="interim-text"></div>
+        </div>
+
+        <!-- PROCESSING (Modal only) -->
+        <div class="view" id="v-busy">
+          <div class="busy-title">Processing</div>
+          <div class="progress-track"><div class="progress-fill" id="progress"></div></div>
+          <div class="log-line show" id="log1">preparing audio payload...</div>
+          <div class="log-line" id="log2">sending to modal api...</div>
+          <div class="log-line" id="log3">transcribing hinglish audio <span class="spin" id="spinner">◐</span></div>
+        </div>
+
+        <!-- RESULT -->
+        <div class="view" id="v-result">
+          <div class="result-label">Transcription</div>
+          <div class="result-text" id="result-text"></div>
+          <div class="divider"></div>
+          <div class="result-meta">
+            <span id="result-engine">engine · browser web speech</span>
+            <span id="result-time"></span>
+          </div>
+        </div>
+
+        <!-- ERROR -->
+        <div class="view" id="v-error">
+          <div class="err-header">System Exception</div>
+          <div class="err-code" id="err-code">ERROR</div>
+          <div class="err-trace" id="err-trace"></div>
+          <div class="err-hint">press RESET to recover</div>
+        </div>
+
+      </div>
+
+      <!-- Footer -->
+      <div class="ftr">
+        <span id="ftr-left">idle</span>
+        <span id="ftr-right">heap 284kb · wifi −62dBm</span>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="bezel-bot"><div class="usb-port"></div></div>
+
+  <!-- Physical buttons -->
+  <div class="btn-row">
+    <div class="btn-unit">
+      <div class="btn" onclick="this.style.transform='translateY(2px)';setTimeout(()=>this.style.transform='',150)">BOOT</div>
+      <div class="btn-lbl">GPIO0</div>
+    </div>
+    <div class="btn-unit">
+      <div class="btn btn-rec-cap" id="btn-rec" onclick="handleRec()">⏺ REC</div>
+      <div class="btn-lbl">Record</div>
+    </div>
+    <div class="btn-unit">
+      <div class="btn" onclick="handleReset(this)">RESET</div>
+      <div class="btn-lbl">EN</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// CONFIG
+// Primary:  Kirti's own Modal ASR deployment
+// Fallback: Dhruv's Modal ASR deployment (used automatically if primary fails)
+// Browser API path never touches either endpoint — zero credits consumed.
+// ─────────────────────────────────────────────────────────────────────────────
+const MODAL_PRIMARY  = 'https://ahamkirtivardhansingh--hinglish-asr-api-fastapi-app-dev.modal.run/transcribe';
+const MODAL_FALLBACK = 'https://dhruv-04--esp32-whisper-hinglish-fastapi-app.modal.run/transcribe';
+const MAX_REC_SEC    = 30;      // auto-stop recording after 30s
+const API_TIMEOUT    = 60000;   // 60s per attempt before abort
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE — single source of truth
+// ─────────────────────────────────────────────────────────────────────────────
+const S = {
+  phase: 'IDLE',          // IDLE | RECORDING | PROCESSING | RESULT | ERROR
+  engine: 'browser',      // 'browser' | 'modal'
+  recSecs: 0,
+  finalText: '',          // accumulated final transcript (browser engine)
+  // timers & animation handles
+  recTimer: null,
+  wvFrame: null,
+  spinTimer: null,
+  // audio objects
+  stream: null,
+  mediaRec: null,
+  audioCtx: null,
+  analyser: null,
+  pcmBuf: null,
+  chunks: [],
+  // speech recognition
+  recognition: null,
+};
+
+const SPIN_CHARS = ['◐','◓','◑','◒'];
+let spinIdx = 0;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLOCK
+// ─────────────────────────────────────────────────────────────────────────────
+const clockStart = Date.now();
+setInterval(() => {
+  const s = Math.floor((Date.now() - clockStart) / 1000);
+  document.getElementById('clock').textContent =
+    pad(Math.floor(s / 3600)) + ':' + pad(Math.floor((s % 3600) / 60)) + ':' + pad(s % 60);
+}, 1000);
+const pad = n => String(n).padStart(2, '0');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VIEW SWITCHING
+// ─────────────────────────────────────────────────────────────────────────────
+const VIEWS = ['idle', 'rec', 'busy', 'result', 'error'];
+
+function showView(name) {
+  VIEWS.forEach(v => {
+    const el = document.getElementById('v-' + v);
+    el.classList.toggle('active', v === name);
+  });
+}
+
+function setFooter(left, right) {
+  document.getElementById('ftr-left').textContent  = left;
+  if (right != null) document.getElementById('ftr-right').textContent = right;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENGINE SELECTOR
+// ─────────────────────────────────────────────────────────────────────────────
+const ENGINE_NOTES = {
+  browser: '<span>Browser API</span> — free · built-in · Chrome/Edge only · no credits needed',
+  modal:   '<span>Modal Whisper</span> — requires API credits · best Hinglish accuracy',
+};
+
+function selectEngine(eng) {
+  S.engine = eng;
+  document.getElementById('eng-browser').classList.toggle('selected', eng === 'browser');
+  document.getElementById('eng-modal').classList.toggle('selected',  eng === 'modal');
+  document.getElementById('eng-note').innerHTML = ENGINE_NOTES[eng];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RECORD BUTTON — main entry point
+// ─────────────────────────────────────────────────────────────────────────────
+function handleRec() {
+  if (S.phase === 'RECORDING') { stopRecording(); return; }
+  if (S.phase !== 'IDLE' && S.phase !== 'RESULT') return;
+  S.engine === 'browser' ? startBrowserASR() : startModalRec();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENGINE A — BROWSER WEB SPEECH API
+// Free, no credits, built-in to Chrome/Edge.
+// Uses SpeechRecognition with hi-IN lang for Hinglish.
+// Also opens mic stream separately for waveform visualization.
+// API is called ONLY for browser UI — zero fetch() calls in this path.
+// ─────────────────────────────────────────────────────────────────────────────
+function startBrowserASR() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    showError('SPEECH_API_UNAVAILABLE',
+      'Web Speech API not supported\nUse Chrome or Edge browser\nor switch to Modal engine');
+    return;
+  }
+
+  S.finalText = '';
+  setRecordingUI('speak now · transcribing live...');
+
+  // Configure recognition
+  S.recognition = new SR();
+  S.recognition.continuous      = true;   // keep listening
+  S.recognition.interimResults  = true;   // show partial results live
+  S.recognition.lang            = 'hi-IN'; // Hindi-India handles Hinglish well
+  S.recognition.maxAlternatives = 1;
+
+  S.recognition.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      e.results[i].isFinal ? (S.finalText += t + ' ') : (interim += t);
+    }
+    // show live interim + what we have so far
+    document.getElementById('interim-text').textContent =
+      interim || S.finalText.trim();
+  };
+
+  S.recognition.onerror = (e) => {
+    // 'no-speech' is not a real error — just silence, ignore it
+    if (e.error === 'no-speech') return;
+    cleanupRecording();
+    if (e.error === 'not-allowed')
+      showError('MIC_PERMISSION_DENIED', 'Microphone access denied\nAllow mic in browser settings');
+    else
+      showError('SPEECH_ERR_' + e.error.toUpperCase(), 'Speech recognition error: ' + e.error);
+  };
+
+  // Browser cuts recognition after silence — restart it automatically
+  S.recognition.onend = () => {
+    if (S.phase === 'RECORDING') {
+      try { S.recognition.start(); } catch (_) {}
+    }
+  };
+
+  S.recognition.start();
+
+  // Mic stream for waveform only — not for recording audio
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(stream => {
+      S.stream = stream;
+      openAnalyser(stream);
+      drawWaveform();
+    })
+    .catch(() => drawWaveform()); // fallback to simulated wave
+
+  startRecTimer();
+}
+
+function finishBrowserASR() {
+  cleanupRecording();
+  const text = (S.finalText.trim() ||
+    document.getElementById('interim-text').textContent.trim());
+  if (!text) {
+    showError('NO_SPEECH_DETECTED',
+      'No speech detected\nSpeak louder or closer to mic\nor try Modal Whisper engine');
+    return;
+  }
+  showResult(text, 'browser api · hi-IN · web speech');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENGINE B — MODAL WHISPER API
+// Records audio via MediaRecorder, sends ONE POST request on stop.
+// API is called ONLY when user explicitly chose Modal AND pressed stop.
+// ─────────────────────────────────────────────────────────────────────────────
+async function startModalRec() {
+  S.chunks = [];
+
+  // Get mic stream
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true }
+    });
+  } catch (e) {
+    showError('MIC_PERMISSION_DENIED', 'Microphone access denied\nAllow mic in browser settings');
+    return;
+  }
+
+  S.stream = stream;
+  setRecordingUI('recording · press REC to stop · max 30s');
+  openAnalyser(stream);
+
+  // Pick best supported MIME type
+  const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg']
+    .find(m => MediaRecorder.isTypeSupported(m)) || '';
+
+  try {
+    S.mediaRec = new MediaRecorder(stream, mime ? { mimeType: mime } : {});
+  } catch (_) {
+    S.mediaRec = new MediaRecorder(stream);
+  }
+
+  S.mediaRec.ondataavailable = e => { if (e.data?.size > 0) S.chunks.push(e.data); };
+  // onstop fires ONLY after user/auto stops — this is the ONLY place API is called
+  S.mediaRec.onstop = () => sendToModal();
+  S.mediaRec.start(100); // collect chunks every 100ms
+
+  drawWaveform();
+  startRecTimer();
+}
+
+function finishModalRec() {
+  cleanupRecording();
+  // onstop → sendToModal() fires automatically after this
+  if (S.mediaRec && S.mediaRec.state !== 'inactive') S.mediaRec.stop();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODAL API CALL — executes exactly once per recording session
+// ─────────────────────────────────────────────────────────────────────────────
+async function sendToModal() {
+  S.phase = 'PROCESSING';
+  showView('busy');
+  setFooter('processing', 'sending to modal api...');
+
+  // Animate progress bar in stages
+  const pf = document.getElementById('progress');
+  pf.style.width = '0';
+  requestAnimationFrame(() => {
+    setTimeout(() => { pf.style.width = '30%'; }, 50);
+    setTimeout(() => { pf.style.width = '65%'; }, 1200);
+    setTimeout(() => { pf.style.width = '85%'; }, 2800);
+  });
+
+  // Staggered log lines
+  setTimeout(() => document.getElementById('log2').classList.add('show'), 700);
+  setTimeout(() => document.getElementById('log3').classList.add('show'), 1500);
+
+  // Spinner
+  const spinEl = document.getElementById('spinner');
+  S.spinTimer = setInterval(() => { spinEl.textContent = SPIN_CHARS[spinIdx++ % 4]; }, 200);
+
+  // Build FormData — multipart/form-data as FastAPI UploadFile expects
+  const blob = new Blob(S.chunks, { type: S.chunks[0]?.type || 'audio/webm' });
+  const fd   = new FormData();
+  fd.append('file', blob, 'recording.webm');
+
+  try {
+    const ctrl    = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), API_TIMEOUT);
+
+    const res = await fetch(MODAL_API, { method: 'POST', body: fd, signal: ctrl.signal });
+    clearTimeout(timeout);
+    clearInterval(S.spinTimer);
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      showError('HTTP_ERROR_' + res.status,
+        'server returned ' + res.status + (body ? '\n' + body.slice(0, 100) : ''));
+      return;
+    }
+
+    const data = await res.json();
+    const text = data.transcription || data.text || data.result || JSON.stringify(data);
+    showResult(text, 'modal · whisper-large-v3-turbo');
+
+  } catch (err) {
+    clearInterval(S.spinTimer);
+    if (err.name === 'AbortError')
+      showError('API_TIMEOUT_504', 'request timed out after 60s\nmodal.run endpoint unreachable\ncheck network / server status');
+    else
+      showError('FETCH_ERROR', (err.message || 'unknown fetch error').slice(0, 100));
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARED RECORDING HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+function setRecordingUI(subText) {
+  S.phase = 'RECORDING';
+  S.recSecs = 0;
+  document.getElementById('rec-timer').textContent   = '00:00';
+  document.getElementById('rec-sub').textContent     = subText;
+  document.getElementById('interim-text').textContent = '';
+  document.getElementById('btn-rec').classList.add('recording');
+  document.getElementById('led-rec').classList.add('active');
+  showView('rec');
+  setFooter('recording', 'mic active · 16kHz');
+}
+
+function startRecTimer() {
+  S.recTimer = setInterval(() => {
+    S.recSecs++;
+    document.getElementById('rec-timer').textContent = pad(Math.floor(S.recSecs / 60)) + ':' + pad(S.recSecs % 60);
+    if (S.recSecs >= MAX_REC_SEC) stopRecording();
+  }, 1000);
+}
+
+function stopRecording() {
+  if (S.phase !== 'RECORDING') return;
+  S.engine === 'browser' ? finishBrowserASR() : finishModalRec();
+}
+
+function cleanupRecording() {
+  // Stop timer
+  clearInterval(S.recTimer); S.recTimer = null;
+  // Stop waveform
+  cancelAnimationFrame(S.wvFrame); S.wvFrame = null;
+  // Stop speech recognition
+  if (S.recognition) { try { S.recognition.stop(); } catch (_) {} S.recognition = null; }
+  // Release mic stream
+  if (S.stream) { S.stream.getTracks().forEach(t => t.stop()); S.stream = null; }
+  // Close audio context
+  if (S.audioCtx) { S.audioCtx.close(); S.audioCtx = null; }
+  S.analyser = null; S.pcmBuf = null;
+  // Update UI
+  document.getElementById('btn-rec').classList.remove('recording');
+  document.getElementById('led-rec').classList.remove('active');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RESULT & ERROR DISPLAY
+// ─────────────────────────────────────────────────────────────────────────────
+function showResult(text, engineStr) {
+  S.phase = 'RESULT';
+  document.getElementById('result-text').textContent = '';
+  document.getElementById('result-engine').textContent = engineStr || '';
+  document.getElementById('result-time').textContent =
+    new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  showView('result');
+  setFooter('done', 'press REC for new session');
+
+  // Typewriter effect — simulates slow hardware serial output
+  let i = 0;
+  const el = document.getElementById('result-text');
+  (function type() {
+    if (i < text.length) {
+      el.textContent += text[i++];
+      setTimeout(type, 18 + Math.random() * 20);
+    }
+  })();
+}
+
+function showError(code, trace) {
+  S.phase = 'ERROR';
+  document.getElementById('err-code').textContent  = code;
+  document.getElementById('err-trace').innerHTML   = (trace || '').replace(/\n/g, '<br>');
+  showView('error');
+  setFooter('error', 'press reset');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RESET — clears all state back to IDLE
+// ─────────────────────────────────────────────────────────────────────────────
+function handleReset(btn) {
+  btn.style.transform   = 'translateY(2px)';
+  btn.style.borderBottom = '1px solid #8a8078';
+  // Full teardown
+  clearInterval(S.recTimer);
+  clearInterval(S.spinTimer);
+  cancelAnimationFrame(S.wvFrame);
+  if (S.recognition) { try { S.recognition.abort(); } catch (_) {} S.recognition = null; }
+  if (S.mediaRec && S.mediaRec.state !== 'inactive') { S.mediaRec.onstop = null; S.mediaRec.stop(); }
+  if (S.stream)   { S.stream.getTracks().forEach(t => t.stop()); S.stream = null; }
+  if (S.audioCtx) { S.audioCtx.close(); S.audioCtx = null; }
+  S.analyser = null; S.pcmBuf = null; S.chunks = []; S.finalText = '';
+  document.getElementById('btn-rec').classList.remove('recording');
+  document.getElementById('led-rec').classList.remove('active');
+  // Reset processing logs for next run
+  document.getElementById('log2').classList.remove('show');
+  document.getElementById('log3').classList.remove('show');
+  setTimeout(() => {
+    btn.style.transform    = '';
+    btn.style.borderBottom = '';
+    S.phase = 'IDLE';
+    showView('idle');
+    setFooter('idle', 'heap 284kb · wifi −62dBm');
+  }, 200);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WAVEFORM — real mic data if available, sine fallback if not
+// ─────────────────────────────────────────────────────────────────────────────
+function openAnalyser(stream) {
+  try {
+    S.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src  = S.audioCtx.createMediaStreamSource(stream);
+    S.analyser = S.audioCtx.createAnalyser();
+    S.analyser.fftSize = 256;
+    S.pcmBuf   = new Uint8Array(S.analyser.frequencyBinCount);
+    src.connect(S.analyser);
+  } catch (_) { S.analyser = null; }
+}
+
+function drawWaveform() {
+  const cv  = document.getElementById('waveform');
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.strokeStyle = '#2a2826';
+  ctx.lineWidth   = 1;
+  ctx.beginPath();
+  const w = cv.width, h = cv.height, mid = h / 2;
+
+  if (S.analyser && S.pcmBuf) {
+    // Real microphone waveform
+    S.analyser.getByteTimeDomainData(S.pcmBuf);
+    const step = w / S.pcmBuf.length;
+    for (let i = 0; i < S.pcmBuf.length; i++) {
+      const y = mid + (S.pcmBuf[i] / 128 - 1) * mid * 0.8;
+      i === 0 ? ctx.moveTo(0, y) : ctx.lineTo(i * step, y);
+    }
+  } else {
+    // Simulated sine wave fallback
+    const t = Date.now() / 300;
+    for (let x = 0; x < w; x++) {
+      const y = mid + Math.sin(x / 18 + t) * 8 + Math.sin(x / 8 + t * 1.5) * 4 + Math.sin(x / 3.5 + t * 0.6) * 2;
+      x === 0 ? ctx.moveTo(0, y) : ctx.lineTo(x, y);
+    }
+  }
+  ctx.stroke();
+  if (S.phase === 'RECORDING') S.wvFrame = requestAnimationFrame(drawWaveform);
+}
+</script>
+</body>
+</html>
